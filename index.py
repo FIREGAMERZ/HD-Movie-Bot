@@ -9,7 +9,7 @@ from movies_scraper import search_movies, get_movie
 
 
 TOKEN = os.getenv("TOKEN")
-URL = os.getenv("URL") 
+URL = "https://replit.com/@joshuapillai777/HD-Movie-Bot?s=app"
 bot = Bot(TOKEN)
 
 
