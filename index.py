@@ -1,86 +1,60 @@
-import os
-from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
-import requests
+import telegram
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 from bs4 import BeautifulSoup
+import requests
 
-TOKEN = "7139621410:AAEWNXk8JQFmQTpSbNBbUZ7gl9Zk45qIkgo"
-app = Flask(__name__)
-updater = Updater(TOKEN, use_context=True)
-dispatcher = updater.dispatcher
+# Your Telegramlink.in API key
+TELEGRAMLINK_API_KEY = "7de232fc833c68108d353b812ac49ef95b45c986"
+# Your Telegram bot token
+TELEGRAM_BOT_TOKEN = "7139621410:AAEWNXk8JQFmQTpSbNBbUZ7gl9Zk45qIkgo"
 
-url_list = {}
-api_key = "44a1bfad3948393badd4d5e4e7ec9b81f39282af"
+def scrape_mkvcinemas(movie_name):
+    url = f"https://mkvcinemas.rsvp/{movie_name.replace(' ', '-')}-full-movie-download-in-hd/"
+    response = requests.get(url)
+    if response.status_code == 200:
+        soup = BeautifulSoup(response.text, 'html.parser')
+        download_links = [a['href'] for a in soup.find_all('a', href=True) if a.text == 'Download From Server']
+        if download_links:
+            return download_links[0]  # Return only the first download link found
+    return None
 
-def search_movies(query):
-    movies_list = []
-    website = BeautifulSoup(requests.get(f"https://mkvcinemas.skin/?s={query.replace(' ', '+')}").text, "html.parser")
-    movies = website.find_all("a", {'class': 'ml-mask jt'})
-    for movie in movies:
-        if movie:
-            title = movie.find("span", {'class': 'mli-info'}).text
-            movies_list.append(title)
-            url_list[title] = movie['href']
-    return movies_list
-
-def get_movie(query):
-    movie_details = {}
-    movie_page_link = BeautifulSoup(requests.get(f"{url_list[query]}").text, "html.parser")
-    if movie_page_link:
-        title = movie_page_link.find("div", {'class': 'mvic-desc'}).h3.text
-        movie_details["title"] = title
-        links = movie_page_link.find_all("a", {'rel': 'noopener', 'data-wpel-link': 'internal'})
-        final_links = {}
-        for i in links:
-            url = f"https://urlshortx.com/api?api={api_key}&url={i['href']}"
-            response = requests.get(url)
-            if response.status_code == 200:
-                link = response.json()
-                final_links[f"{i.text}"] = link['shortenedUrl']
-        movie_details["links"] = final_links
-    return movie_details
-
-def welcome(update: Update, context: CallbackContext) -> None:
-    update.message.reply_text(f"Hello {update.message.from_user.first_name}, Welcome to SB Movies.\n"
-                              f"🔥 Download Your Favourite Movies For 💯 Free And 🍿 Enjoy it.")
-    update.message.reply_text("👇 Enter Movie Name 👇")
-
-def find_movie(update: Update, context: CallbackContext) -> None:
-    query = update.message.text
-    movies_list = search_movies(query)
-    if movies_list:
-        reply_markup = InlineKeyboardMarkup.from_column(
-            [[InlineKeyboardButton(title, callback_data=title)] for title in movies_list])
-        update.message.reply_text('Search Results...', reply_markup=reply_markup)
+def shorten_link(long_url):
+    # Call Telegramlink.in API to shorten the URL
+    response = requests.post("https://telegramlink.in/api/shorten",
+                             data={"key": TELEGRAMLINK_API_KEY, "url": long_url})
+    if response.status_code == 200:
+        return response.json()["shortenedUrl"]
     else:
-        update.message.reply_text('Sorry 🙏, No Result Found!\nCheck If You Have Misspelled The Movie Name.')
+        return None
 
-def movie_result(update: Update, context: CallbackContext) -> None:
-    query = update.callback_query
-    s = get_movie(query.data)
-    caption = f"🎥 {s['title']}\n\n"
-    for title, link in s["links"].items():
-        caption += f"🎬 {title}: {link}\n"
-    query.message.reply_text(text=caption)
+def start(update, context):
+    update.message.reply_text("Welcome to the Movie Bot! Send me a movie name and I'll find the download link for you.")
 
-dispatcher.add_handler(CommandHandler('start', welcome))
-dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, find_movie))
-dispatcher.add_handler(CallbackQueryHandler(movie_result))
+def movie_handler(update, context):
+    movie_name = update.message.text
+    
+    # Scrape mkvcinemas.rsvp for the movie download link
+    download_link = scrape_mkvcinemas(movie_name)
+    
+    if download_link:
+        # Shorten the download link
+        short_link = shorten_link(download_link)
+        if short_link:
+            update.message.reply_text(f"Here's the download link for '{movie_name}': {short_link}")
+        else:
+            update.message.reply_text("Sorry, I couldn't generate the download link at the moment. Please try again later.")
+    else:
+        update.message.reply_text("Sorry, I couldn't find any information about this movie on mkvcinemas.rsvp.")
 
-@app.route('/')
-def index():
-    return 'Hello World!'
+def main():
+    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
+    dp = updater.dispatcher
 
-@app.route('/setwebhook', methods=['GET', 'POST'])
-def set_webhook():
-    # Logic to set up webhook
-    return 'Webhook setup successful'  # Or any appropriate response
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, movie_handler))
 
-def webhook():
-    update = Update.de_json(request.get_json(force=True), updater.bot)
-    dispatcher.process_update(update)
-    return 'ok'
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == '__main__':
-    app.run(port=5000)
+    main()
